@@ -718,6 +718,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "uxch-egress-terminal"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+ "uxch-core",
+]
+
+[[package]]
 name = "uxch-harness"
 version = "0.0.1"
 dependencies = [
@@ -737,10 +745,12 @@ dependencies = [
 name = "uxch-ingress-binance"
 version = "0.0.1"
 dependencies = [
+ "httparse",
  "rustls",
  "serde_json",
  "tungstenite",
  "uxch-core",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
