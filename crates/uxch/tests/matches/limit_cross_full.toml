@@ -1,0 +1,25 @@
+description = "buy 5@100 rests, sell 5@100 crosses -> full fill 5@100, empty book"
+
+[[orders]]
+id = 1
+side = "buy"
+type = "limit"
+tif = "gtc"
+price = 100
+qty = 5
+
+[[orders]]
+id = 2
+side = "sell"
+type = "limit"
+tif = "gtc"
+price = 100
+qty = 5
+
+[[expected.trades]]
+price = 100
+qty = 5
+maker = 1
+taker = 2
+
+[expected.bbo]

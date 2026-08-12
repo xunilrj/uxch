@@ -1,0 +1,24 @@
+description = "sell 2@100 rests, buy 5@100 FOK not fully fillable -> rejected (id 2), no trades, ask 100x2"
+
+[[orders]]
+id = 1
+side = "sell"
+type = "limit"
+tif = "gtc"
+price = 100
+qty = 2
+
+[[orders]]
+id = 2
+side = "buy"
+type = "limit"
+tif = "fok"
+price = 100
+qty = 5
+
+[[expected.rejects]]
+id = 2
+reason = "FokNotFullyFillable"
+
+[expected.bbo]
+ask = { price = 100, qty = 2 }

@@ -8,7 +8,6 @@ pub enum OrderMsg {
         side: Side,
         ty: OrderType,
         tif: TimeInForce,
-        price: Price,
         qty: Qty,
     },
     Cancel {
@@ -21,9 +20,8 @@ impl OrderMsg {
         Self::New {
             id,
             side,
-            ty: OrderType::Limit,
+            ty: OrderType::Limit { price },
             tif: TimeInForce::Gtc,
-            price,
             qty,
         }
     }
@@ -34,7 +32,6 @@ impl OrderMsg {
             side,
             ty: OrderType::Market,
             tif: TimeInForce::Ioc,
-            price: 0,
             qty,
         }
     }

@@ -1,0 +1,40 @@
+description = "bids 2@105 + 3@100, sell 4@100 sweeps both -> fills (105,2),(100,2), residual bid 100x1"
+
+[[orders]]
+id = 1
+side = "buy"
+type = "limit"
+tif = "gtc"
+price = 105
+qty = 2
+
+[[orders]]
+id = 2
+side = "buy"
+type = "limit"
+tif = "gtc"
+price = 100
+qty = 3
+
+[[orders]]
+id = 3
+side = "sell"
+type = "limit"
+tif = "gtc"
+price = 100
+qty = 4
+
+[[expected.trades]]
+price = 105
+qty = 2
+maker = 1
+taker = 3
+
+[[expected.trades]]
+price = 100
+qty = 2
+maker = 2
+taker = 3
+
+[expected.bbo]
+bid = { price = 100, qty = 1 }

@@ -20,5 +20,10 @@ pub struct Bbo {
 pub enum MarketEvent {
     Trade(Trade),
     Bbo(Bbo),
-    Reject { id: OrderId, reason: &'static str },
+    Reject { id: OrderId, reason: RejectReason },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RejectReason {
+    FokNotFullyFillable,
 }

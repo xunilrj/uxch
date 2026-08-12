@@ -3,6 +3,7 @@ use serde::Deserialize;
 use std::ffi::OsStr;
 use std::path::Path;
 use uxch::core::{MarketEvent, MatchingEngine, OrderMsg, OrderType, Side, TimeInForce, bounded};
+use uxch_core::egress::RejectReason;
 
 #[derive(Deserialize)]
 struct TestCase {
@@ -15,14 +16,21 @@ struct TestCase {
     expected: Expected,
 }
 
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+enum Kind {
+    Limit,
+    Market,
+}
+
 #[derive(Deserialize)]
 struct OrderInput {
     id: u64,
     side: Side,
     #[serde(rename = "type")]
-    ty: OrderType,
+    kind: Kind,
     tif: TimeInForce,
-    price: i64,
+    price: Option<i64>,
     qty: u64,
 }
 
@@ -30,6 +38,8 @@ struct OrderInput {
 struct Expected {
     #[serde(default)]
     trades: Vec<TradeInput>,
+    #[serde(default)]
+    rejects: Vec<RejectInput>,
     #[serde(default)]
     bbo: Option<BboInput>,
 }
@@ -40,6 +50,13 @@ struct TradeInput {
     qty: u64,
     maker: u64,
     taker: u64,
+}
+
+#[derive(Deserialize)]
+struct RejectInput {
+    id: u64,
+    #[serde(default)]
+    reason: String,
 }
 
 #[derive(Deserialize)]
@@ -108,12 +125,17 @@ fn run_test_case(case: TestCase) -> Result<(), Failed> {
     let (egress_tx, egress_rx) = bounded::bounded::<MarketEvent>(1024);
 
     for order in &case.orders {
+        let ty = match order.kind {
+            Kind::Limit => OrderType::Limit {
+                price: order.price.ok_or("limit order requires a price")?,
+            },
+            Kind::Market => OrderType::Market,
+        };
         let msg = OrderMsg::New {
             id: order.id,
             side: order.side,
-            ty: order.ty,
+            ty,
             tif: order.tif,
-            price: order.price,
             qty: order.qty,
         };
         ingress_tx.send(msg).map_err(|_| "ingress channel closed")?;
@@ -124,11 +146,18 @@ fn run_test_case(case: TestCase) -> Result<(), Failed> {
 
     let mut fills = Vec::new();
     let mut last_bbo = None;
+    let mut reject_ids = Vec::new();
+    let mut reject_reasons: Vec<&'static str> = Vec::new();
     while let Some(ev) = egress_rx.try_recv() {
         match ev {
             MarketEvent::Trade(t) => fills.push((t.price, t.qty, t.maker, t.taker)),
             MarketEvent::Bbo(b) => last_bbo = Some(b),
-            MarketEvent::Reject { .. } => {}
+            MarketEvent::Reject { id, reason } => {
+                reject_ids.push(id);
+                reject_reasons.push(match reason {
+                    RejectReason::FokNotFullyFillable => "FokNotFullyFillable",
+                });
+            }
         }
     }
 
@@ -143,6 +172,30 @@ fn run_test_case(case: TestCase) -> Result<(), Failed> {
             "trades mismatch\n  expected: {expected_trades:?}\n  got:      {fills:?}"
         )
         .into());
+    }
+
+    let expected_reject_ids = case
+        .expected
+        .rejects
+        .iter()
+        .map(|r| r.id)
+        .collect::<Vec<_>>();
+    if reject_ids != expected_reject_ids {
+        return Err(format!(
+            "rejects mismatch\n  expected: {expected_reject_ids:?}\n  got:      {reject_ids:?}"
+        )
+        .into());
+    }
+
+    for (i, exp) in case.expected.rejects.iter().enumerate() {
+        let got = reject_reasons.get(i).copied().unwrap_or("");
+        if got != exp.reason.as_str() {
+            return Err(format!(
+                "reject {i} reason mismatch\n  expected: {}\n  got:      {got}",
+                exp.reason
+            )
+            .into());
+        }
     }
 
     if let Some(exp_bbo) = case.expected.bbo {

@@ -1,0 +1,40 @@
+description = "two sells at 100 (3 then 2), buy 4@100 fills FIFO -> (100,3,maker1),(100,1,maker2), ask 100x1"
+
+[[orders]]
+id = 1
+side = "sell"
+type = "limit"
+tif = "gtc"
+price = 100
+qty = 3
+
+[[orders]]
+id = 2
+side = "sell"
+type = "limit"
+tif = "gtc"
+price = 100
+qty = 2
+
+[[orders]]
+id = 3
+side = "buy"
+type = "limit"
+tif = "gtc"
+price = 100
+qty = 4
+
+[[expected.trades]]
+price = 100
+qty = 3
+maker = 1
+taker = 3
+
+[[expected.trades]]
+price = 100
+qty = 1
+maker = 2
+taker = 3
+
+[expected.bbo]
+ask = { price = 100, qty = 1 }

@@ -1,0 +1,39 @@
+description = "asks 2@100 + 3@101, buy 5@101 sweeps both levels -> fills (100,2),(101,3), empty book"
+
+[[orders]]
+id = 1
+side = "sell"
+type = "limit"
+tif = "gtc"
+price = 100
+qty = 2
+
+[[orders]]
+id = 2
+side = "sell"
+type = "limit"
+tif = "gtc"
+price = 101
+qty = 3
+
+[[orders]]
+id = 3
+side = "buy"
+type = "limit"
+tif = "gtc"
+price = 101
+qty = 5
+
+[[expected.trades]]
+price = 100
+qty = 2
+maker = 1
+taker = 3
+
+[[expected.trades]]
+price = 101
+qty = 3
+maker = 2
+taker = 3
+
+[expected.bbo]

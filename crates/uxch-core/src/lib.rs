@@ -6,7 +6,7 @@ pub mod engine;
 pub mod ingress;
 pub mod slab;
 
-pub use book::{Book, Order};
+pub use book::{Book, Order, Pricing};
 pub use egress::{Bbo, MarketEvent, Trade};
 pub use engine::MatchingEngine;
 pub use ingress::OrderMsg;
@@ -29,7 +29,7 @@ pub enum Side {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
 pub enum OrderType {
-    Limit,
+    Limit { price: Price },
     Market,
 }
 

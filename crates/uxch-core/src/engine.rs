@@ -1,15 +1,17 @@
-use crate::book::{Book, Order};
-use crate::egress::MarketEvent;
+use crate::book::{Book, Order, Pricing};
+use crate::egress::{Bbo, MarketEvent, RejectReason};
 use crate::ingress::OrderMsg;
 use crate::slab::Slab;
+use crate::{OrderId, OrderType, Qty, Side, TimeInForce, Trade};
 use milkyapps_core::sync::bounded::{Receiver, Sender};
 
-#[allow(dead_code)] // fields are read by the match loop, which is `todo!()` for now.
+#[allow(dead_code)]
 pub struct MatchingEngine {
     book: Book,
     orders: Slab<Order>,
     ingress: Receiver<OrderMsg>,
     egress: Sender<MarketEvent>,
+    pricing: Pricing,
 }
 
 impl MatchingEngine {
@@ -19,10 +21,93 @@ impl MatchingEngine {
             orders: Slab::default(),
             ingress,
             egress,
+            pricing: Pricing::Maker,
         }
     }
 
+    /// Match at price-time priority, publish trades + BBO on
+    /// egress. Returns once the ingress channel is empty.
     pub fn run(&mut self) {
-        todo!("")
+        while let Some(msg) = self.ingress.try_recv() {
+            match msg {
+                OrderMsg::New {
+                    id,
+                    side,
+                    ty,
+                    tif,
+                    qty,
+                } => self.handle_new(id, side, ty, tif, qty),
+                OrderMsg::Cancel { id } => {
+                    self.book.cancel(id);
+                    self.publish_bbo();
+                }
+            }
+        }
+    }
+
+    fn handle_new(&mut self, id: OrderId, side: Side, ty: OrderType, tif: TimeInForce, qty: Qty) {
+        let crossing_limit = match ty {
+            OrderType::Limit { price } => Some(price),
+            OrderType::Market => None,
+        };
+
+        // reject unless the full quantity of a fok can be filled now.
+        if tif == TimeInForce::Fok && !self.book.can_fill(side, crossing_limit, qty) {
+            self.publish_reject(id, RejectReason::FokNotFullyFillable);
+            self.publish_bbo();
+            return;
+        }
+
+        let mut incoming = Order {
+            id,
+            side,
+            ty,
+            tif,
+            qty,
+            filled: 0,
+            seq: 0,
+        };
+
+        let trades = match side {
+            Side::Buy => self
+                .book
+                .match_buy(&mut incoming, crossing_limit, self.pricing),
+            Side::Sell => self
+                .book
+                .match_sell(&mut incoming, crossing_limit, self.pricing),
+        };
+
+        for trade in trades {
+            self.publish_trade(trade);
+        }
+
+        // only GTC limit orders rest on the book.
+        if incoming.remaining() > 0
+            && tif == TimeInForce::Gtc
+            && matches!(ty, OrderType::Limit { .. })
+        {
+            self.book.insert(incoming);
+        }
+
+        self.publish_bbo();
+    }
+
+    fn publish_bbo(&self) {
+        self.egress
+            .send(MarketEvent::Bbo(Bbo {
+                bid: self.book.best_bid(),
+                ask: self.book.best_ask(),
+            }))
+            .unwrap();
+    }
+
+    fn publish_reject(&self, id: u64, reason: RejectReason) {
+        self.egress
+            .send(MarketEvent::Reject { id, reason })
+            .unwrap();
+    }
+
+    fn publish_trade(&self, trade: Trade) {
+        self.egress.send(MarketEvent::Trade(trade)).unwrap();
     }
 }
