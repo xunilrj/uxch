@@ -2,6 +2,8 @@ use crate::{OrderId, OrderType, Price, Qty, Side, TimeInForce};
 
 /// Ingress message: a new order or a cancel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
 pub enum OrderMsg {
     New {
         id: OrderId,

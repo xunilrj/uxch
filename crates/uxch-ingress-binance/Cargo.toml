@@ -1,0 +1,11 @@
+[package]
+name = "uxch-ingress-binance"
+description = "Binance market-stream ingress (WebSocket → OrderMsg)"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+uxch-core = { workspace = true, features = ["serde"] }
+tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", features = ["ring"] }
+serde_json = "1"
