@@ -5,6 +5,8 @@
 
 pub mod depth;
 
+use std::fs::File;
+use std::io::BufRead;
 use std::thread;
 use std::time::Duration;
 use tungstenite::{Message, connect};
@@ -29,8 +31,24 @@ pub fn run(
                 eprintln!("binance relay: disconnected; reconnecting in 1s");
                 thread::sleep(Duration::from_secs(1));
             }
+            Err(Error::Io(e)) => return Err(Error::Io(e)),
         }
     }
+}
+
+pub fn replay(path: &str, mut on_order: impl FnMut(OrderMsg)) -> Result<(), Error> {
+    let file = File::open(path).map_err(|e| Error::Io(format!("open {path}: {e}")))?;
+    let reader = std::io::BufReader::new(file);
+    for line in reader.lines() {
+        let l = line.map_err(|e| Error::Io(format!("read {path}: {e}")))?;
+        if l.is_empty() {
+            continue;
+        }
+        let msg: OrderMsg =
+            serde_json::from_str(&l).map_err(|e| Error::Io(format!("parse {path}: {e}")))?;
+        on_order(msg);
+    }
+    Ok(())
 }
 
 fn relay_once(
@@ -102,6 +120,7 @@ fn relay_once(
 pub enum Error {
     WebSocket(String),
     Http(String),
+    Io(String),
     Closed,
 }
 
@@ -110,6 +129,7 @@ impl std::fmt::Display for Error {
         match self {
             Self::WebSocket(s) => write!(f, "websocket: {s}"),
             Self::Http(s) => write!(f, "http: {s}"),
+            Self::Io(s) => write!(f, "io: {s}"),
             Self::Closed => write!(f, "connection closed"),
         }
     }
@@ -120,5 +140,47 @@ impl std::error::Error for Error {}
 impl From<tungstenite::Error> for Error {
     fn from(e: tungstenite::Error) -> Self {
         Self::WebSocket(e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use uxch_core::Side;
+
+    /// Save a few `OrderMsg` to a tape, replay them through a collecting closure,
+    /// and assert the round-trip is identity — the wire format and ids survive
+    /// a save→replay cycle unchanged.
+    #[test]
+    fn replay_round_trips_a_tape_unchanged() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("uxch_ingress_replay_test.tape");
+
+        let written = vec![
+            OrderMsg::new_limit(1, Side::Buy, 61078000000, 3941300000),
+            OrderMsg::new_market(2, Side::Sell, 500),
+            OrderMsg::Cancel { id: 1 },
+        ];
+
+        {
+            let file = std::fs::File::create(&path).unwrap();
+            let mut out = std::io::BufWriter::new(file);
+            for m in &written {
+                let mut line = serde_json::to_string(m).unwrap();
+                line.push('\n');
+                out.write_all(line.as_bytes()).unwrap();
+            }
+            out.flush().unwrap();
+        }
+
+        let mut read = Vec::new();
+        replay(path.to_str().unwrap(), |m| read.push(m)).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(read.len(), written.len());
+        for (got, want) in read.iter().zip(written.iter()) {
+            assert_eq!(got, want, "OrderMsg changed across save→replay");
+        }
     }
 }

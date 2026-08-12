@@ -2,8 +2,10 @@
 //!
 //! Listens on a TCP socket (default `127.0.0.1:9998`).
 
-use std::io::{BufRead, BufReader};
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::PathBuf;
 
 use uxch_core::egress::RejectReason;
 use uxch_core::{Bbo, MarketEvent, Trade};
@@ -11,7 +13,7 @@ use uxch_core::{Bbo, MarketEvent, Trade};
 /// Fixed-point scale used across uxch (8 decimals).
 const SCALE: u64 = 100_000_000;
 
-pub fn serve(addr: SocketAddr) -> Result<(), std::io::Error> {
+pub fn serve(addr: SocketAddr, save: Option<PathBuf>) -> Result<(), std::io::Error> {
     let listener = TcpListener::bind(addr)?;
     println!("uxch-egress-terminal: listening on {addr}");
 
@@ -23,7 +25,7 @@ pub fn serve(addr: SocketAddr) -> Result<(), std::io::Error> {
                     .map(|p| p.to_string())
                     .unwrap_or_else(|_| "?".into());
                 println!("uxch-egress-terminal: uxch connected from {peer}");
-                if let Err(e) = relay(s) {
+                if let Err(e) = relay(s, save.as_ref()) {
                     eprintln!("uxch-egress-terminal: {e}");
                 }
                 println!("uxch-egress-terminal: uxch disconnected; waiting for reconnect");
@@ -34,7 +36,12 @@ pub fn serve(addr: SocketAddr) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-fn relay(stream: TcpStream) -> Result<(), std::io::Error> {
+fn relay(stream: TcpStream, save: Option<&PathBuf>) -> Result<(), std::io::Error> {
+    let mut tape = match save {
+        Some(p) => Some(BufWriter::new(File::create(p)?)),
+        None => None,
+    };
+
     let reader = BufReader::new(stream);
     for line in reader.lines() {
         let l = line?;
@@ -44,6 +51,11 @@ fn relay(stream: TcpStream) -> Result<(), std::io::Error> {
         match serde_json::from_str::<MarketEvent>(&l) {
             Ok(ev) => println!("{}", render(&ev)),
             Err(e) => eprintln!("uxch-egress-terminal: decode error: {e} | {l}"),
+        }
+        if let Some(out) = tape.as_mut() {
+            out.write_all(l.as_bytes())?;
+            out.write_all(b"\n")?;
+            out.flush()?;
         }
     }
     Ok(())

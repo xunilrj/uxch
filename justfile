@@ -96,3 +96,99 @@ smoke:
 
     sleep "$duration"
     echo "smoke: done — see $LOG"
+
+# Record a live Binance order stream to a tape file (NDJSON OrderMsg per line).
+[group("binance")]
+binance-record:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    duration="${RECORD_DURATION:-20}"
+    symbol="${RECORD_SYMBOL:-bnbusdt}"
+
+    cargo build -p uxch-ingress-binance
+    mkdir -p target/tapes
+    TAPE="target/tapes/${symbol}.tape"
+    : > "$TAPE"
+
+    echo "record: saving ${symbol}@depth → $TAPE for ${duration}s"
+    target/debug/uxch-ingress-binance --record "$TAPE" "$symbol" &
+    ING_PID=$!
+    cleanup() { kill "$ING_PID" 2>/dev/null || true; wait "$ING_PID" 2>/dev/null || true; }
+    trap cleanup EXIT INT
+
+    sleep "$duration"
+    echo "record: stopping ingress (pid $ING_PID)"
+    kill "$ING_PID" 2>/dev/null || true
+    wait "$ING_PID" 2>/dev/null || true
+    trap - EXIT INT
+
+    lines=$(wc -l < "$TAPE" | tr -d ' ')
+    echo "record: wrote $TAPE ($lines lines)"
+
+# Convergence / determinism check
+[group("binance")]
+binance-replay-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    tape="${REPLAY_TAPE:-target/tapes/bnbusdt.tape}"
+    bin_a="${UXCH_BIN_A:-target/debug/uxch}"
+    bin_b="${UXCH_BIN_B:-target/debug/uxch}"
+    egress_addr="${UXCH_EGRESS_ADDR:-127.0.0.1:9998}"
+    ingress_addr="${UXCH_INGRESS_ADDR:-127.0.0.1:9999}"
+
+    if [ ! -f "$tape" ]; then
+        echo "replay-check: tape not found: $tape (run 'just binance-record' first)" >&2
+        exit 1
+    fi
+    for b in "$bin_a" "$bin_b"; do
+        if [ ! -x "$b" ]; then
+            echo "replay-check: uxch binary not found/executable: $b" >&2
+            exit 1
+        fi
+    done
+
+    cargo build -p uxch-egress-terminal -p uxch-ingress-binance
+
+    mkdir -p target
+    tmp=$(mktemp -d target/replay-check.XXXXXX)
+    events_a="$tmp/eventsA.jsonl"
+    events_b="$tmp/eventsB.jsonl"
+    echo "replay-check: tape=$tape bin_a=$bin_a bin_b=$bin_b tmp=$tmp"
+
+    run_once() {
+        # $1 = uxch binary, $2 = events output file
+        local uxch_bin="$1"
+        local out="$2"
+
+        UXCH_EGRESS_ADDR="$egress_addr" target/debug/uxch-egress-terminal --save "$out" \
+            >"$tmp/terminal.log" 2>&1 &
+        local term_pid=$!
+        sleep 0.5
+
+        UXCH_INGRESS_ADDR="$ingress_addr" UXCH_EGRESS_ADDR="$egress_addr" "$uxch_bin" \
+            >"$tmp/uxch.log" 2>&1 &
+        local uxch_pid=$!
+        sleep 0.5
+
+        # Replay runs in the foreground; it exits at EOF.
+        UXCH_INGRESS_ADDR="$ingress_addr" target/debug/uxch-ingress-binance --replay "$tape" \
+            >"$tmp/ingress.log" 2>&1 || true
+
+        # Let the terminal flush the last events, then tear down.
+        sleep 0.5
+        kill "$uxch_pid" "$term_pid" 2>/dev/null || true
+        wait "$uxch_pid" "$term_pid" 2>/dev/null || true
+    }
+
+    run_once "$bin_a" "$events_a"
+    run_once "$bin_b" "$events_b"
+
+    if diff -u "$events_a" "$events_b"; then
+        echo "CONVERGENT (identical MarketEvent egress: $(wc -l < "$events_a" | tr -d ' ') lines)"
+        exit 0
+    else
+        echo "DIVERGENT (see diff above)" >&2
+        exit 1
+    fi
