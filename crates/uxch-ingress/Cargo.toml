@@ -1,0 +1,8 @@
+[package]
+name = "uxch-ingress"
+description = "Order ingress"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+uxch-core.workspace = true

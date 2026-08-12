@@ -1,0 +1,10 @@
+[package]
+name = "uxch-harness"
+description = "Latency harness"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+uxch-core.workspace = true
+uxch-ingress.workspace = true
+uxch-egress.workspace = true

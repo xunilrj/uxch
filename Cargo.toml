@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/*",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.96"
+license = "MIT"
+authors = ["Daniel Frederico Lins Leite"]
+repository = "https://github.com/milkyapps/uxch"
+homepage = "https://github.com/milkyapps/uxch"
+publish = false
+
+[workspace.dependencies]
+uxch-core = { path = "crates/uxch-core", version = "0.0.1" }
+uxch-ingress = { path = "crates/uxch-ingress", version = "0.0.1" }
+uxch-egress = { path = "crates/uxch-egress", version = "0.0.1" }
+uxch-risk = { path = "crates/uxch-risk", version = "0.0.1" }
+uxch-harness = { path = "crates/uxch-harness", version = "0.0.1" }

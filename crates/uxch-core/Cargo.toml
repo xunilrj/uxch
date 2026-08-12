@@ -1,0 +1,5 @@
+[package]
+name = "uxch-core"
+description = "Matching engine core"
+edition.workspace = true
+version.workspace = true

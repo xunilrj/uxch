@@ -1,0 +1,8 @@
+[package]
+name = "uxch-egress"
+description = "Market-data egress"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+uxch-core.workspace = true
