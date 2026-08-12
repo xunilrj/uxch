@@ -5,8 +5,17 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-uxch-core.workspace = true
+uxch-core = { workspace = true, features = ["serde"] }
 uxch-ingress.workspace = true
 uxch-egress.workspace = true
 uxch-risk.workspace = true
 uxch-harness.workspace = true
+
+[dev-dependencies]
+libtest-mimic = "0.8"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+
+[[test]]
+name = "matches"
+harness = false

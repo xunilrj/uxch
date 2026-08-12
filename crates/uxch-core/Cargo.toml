@@ -3,3 +3,10 @@ name = "uxch-core"
 description = "Matching engine core"
 edition.workspace = true
 version.workspace = true
+
+[dependencies]
+milkyapps-core = { git = "https://github.com/milkyapps/core", rev = "33cc0aa9b2e6d311e41462b9bdd903e38f2a65ad" }
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+serde = ["dep:serde"]
