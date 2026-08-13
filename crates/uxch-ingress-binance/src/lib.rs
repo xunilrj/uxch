@@ -36,7 +36,8 @@ pub fn run(
     }
 }
 
-pub fn replay(path: &str, mut on_order: impl FnMut(OrderMsg)) -> Result<(), Error> {
+/// Replay a tape
+pub fn replay(path: &str, pace: Duration, mut on_order: impl FnMut(OrderMsg)) -> Result<(), Error> {
     let file = File::open(path).map_err(|e| Error::Io(format!("open {path}: {e}")))?;
     let reader = std::io::BufReader::new(file);
     for line in reader.lines() {
@@ -47,6 +48,9 @@ pub fn replay(path: &str, mut on_order: impl FnMut(OrderMsg)) -> Result<(), Erro
         let msg: OrderMsg =
             serde_json::from_str(&l).map_err(|e| Error::Io(format!("parse {path}: {e}")))?;
         on_order(msg);
+        if !pace.is_zero() {
+            thread::sleep(pace);
+        }
     }
     Ok(())
 }
@@ -175,7 +179,7 @@ mod tests {
         }
 
         let mut read = Vec::new();
-        replay(path.to_str().unwrap(), |m| read.push(m)).unwrap();
+        replay(path.to_str().unwrap(), Duration::ZERO, |m| read.push(m)).unwrap();
         std::fs::remove_file(&path).ok();
 
         assert_eq!(read.len(), written.len());

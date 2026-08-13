@@ -2,7 +2,10 @@ use libtest_mimic::{Arguments, Failed, Trial};
 use serde::Deserialize;
 use std::ffi::OsStr;
 use std::path::Path;
-use uxch::core::{MarketEvent, MatchingEngine, OrderMsg, OrderType, Side, TimeInForce, bounded};
+use uxch::core::{
+    MarketEvent, MarketEventContent, MatchingEngine, OrderMsg, OrderType, Side, TimeInForce,
+    bounded,
+};
 use uxch_core::egress::RejectReason;
 
 #[derive(Deserialize)]
@@ -149,10 +152,10 @@ fn run_test_case(case: TestCase) -> Result<(), Failed> {
     let mut reject_ids = Vec::new();
     let mut reject_reasons: Vec<&'static str> = Vec::new();
     while let Some(ev) = egress_rx.try_recv() {
-        match ev {
-            MarketEvent::Trade(t) => fills.push((t.price, t.qty, t.maker, t.taker)),
-            MarketEvent::Bbo(b) => last_bbo = Some(b),
-            MarketEvent::Reject { id, reason } => {
+        match ev.event {
+            MarketEventContent::Trade(t) => fills.push((t.price, t.qty, t.maker, t.taker)),
+            MarketEventContent::Bbo(b) => last_bbo = Some(b),
+            MarketEventContent::Reject { id, reason } => {
                 reject_ids.push(id);
                 reject_reasons.push(match reason {
                     RejectReason::FokNotFullyFillable => "FokNotFullyFillable",

@@ -192,3 +192,15 @@ binance-replay-check:
         echo "DIVERGENT (see diff above)" >&2
         exit 1
     fi
+
+# HA failover stress test. Options: UXCH_HA_ITERS, UXCH_HA_SEED
+[group("test")]
+ha:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build -p uxch -p uxch-egress-terminal -p uxch-ingress-binance
+    UXCH_HA_ITERS="${UXCH_HA_ITERS:-1}" \
+    UXCH_HA_SEED="${UXCH_HA_SEED:-0}" \
+    UXCH_HA_TAPE_SIZE="${UXCH_HA_TAPE_SIZE:-20000}" \
+    UXCH_HA_PACE_US="${UXCH_HA_PACE_US:-100}" \
+    cargo test -p uxch --test ha -- --ignored --nocapture

@@ -21,7 +21,7 @@ pub struct Bbo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
-pub enum MarketEvent {
+pub enum MarketEventContent {
     Trade(Trade),
     Bbo(Bbo),
     Reject { id: OrderId, reason: RejectReason },
@@ -32,4 +32,11 @@ pub enum MarketEvent {
 #[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
 pub enum RejectReason {
     FokNotFullyFillable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct MarketEvent {
+    pub seq: u64,
+    pub event: MarketEventContent,
 }

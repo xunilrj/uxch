@@ -4,41 +4,62 @@ A single-threaded Rust matching-engine.
 
 - central limit order book
 - lock-free ingress ring
-- emitts normalized market data over a fan-out ring
+- emits normalized market data over a fan-out ring
 - pre-trade risk gate
 - latency harness
 - kernel-tuning runbook.
 
 Do not use this in production.
 
-## Status
-
-- TODO LIST HERE WHAT IS ALREADY IMPLEMENTED
-
 ## Architecture
 
 ```
-                    ┌─────────────┐   lock-free MPMC ring
-   Order gateway ──▶│  Ingress    │──▶  Risk check ──▶  Matching core (single thread,
-   (TCP / binary)   │  decoder    │                    pinned core, no allocs)
-                    └─────────────┘                          │
-                                                             ▼
-                                              ┌──────────────────────────┐
-                                              │ Market-data fan-out ring  │──▶ N subscribers
-                                              │ (disruptor-style, MPMC)   │   (UDP multicast out)
-                                              └──────────────────────────┘
-                                                             │
-                                                             ▼
-                                                    Snapshot + journal (recovery)
+                         Binance diff-depth WS
+                                 │
+                                 ▼
+   ┌────────────────────────────────────────────────────┐
+   │ uxch-ingress-binance                                │
+   │  depth-sync (snapshot seed + diff stream) → OrderMsg│
+   │  modes: live · --record <tape> · --replay <tape>    │
+   └──────────────────┬─────────────────────────────────┘
+        OrderMsg NDJSON  (TCP, one JSON object per line)
+                      ▼
+   ┌────────────────────────────────────────────────────┐
+   │ uxch  (single-threaded matching core)               │
+   │  ingress ring ─▶ MatchingEngine ─▶ egress ring      │
+   └──────────────────┬─────────────────────────────────┘
+        MarketEvent NDJSON  (TCP; uxch dials out to the sink)
+                      ▼
+   ┌────────────────────────────────────────────────────┐
+   │ uxch-egress-terminal                                │
+   │  render to stdout · --save (active) · --record (all)│
+   │  failover across comma-separated listen addresses   │
+   └────────────────────────────────────────────────────┘
 ```
 
-Single-threaded matching core (LMAX style): no memory barriers, no false sharing, the book stays hot in L1/L2. Ingress and egress are decoupled via the lock-free rings.
+Single-threaded matching core (LMAX style): no memory barriers, no false sharing,
+the book stays hot in L1/L2. Ingress and egress are decoupled via the lock-free
+rings.
+
+## High availability
+
+Two complete pipelines on different ports; both ingresses independently 
+sync their orders, so both uxch instances converge to the same BBO. 
+If one dies, the other is already live.
+
+```
+ingress-A ─▶ uxch-A ─▶ :9997 ┐
+                            ├──▶ uxch-egress-terminal
+ingress-B ─▶ uxch-B ─▶ :9996 ┘   (prefers :9997, falls back to :9996)
+```
+
 
 ## Build & test
 
 ```
 cargo r -p uxch -r
 cargo t
+just ha
 ```
 
 ## See more

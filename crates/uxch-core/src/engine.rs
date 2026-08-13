@@ -1,5 +1,5 @@
 use crate::book::{Book, Order, Pricing};
-use crate::egress::{Bbo, MarketEvent, RejectReason};
+use crate::egress::{Bbo, MarketEvent, MarketEventContent, RejectReason};
 use crate::ingress::OrderMsg;
 use crate::slab::Slab;
 use crate::{OrderId, OrderType, Qty, Side, TimeInForce, Trade};
@@ -12,6 +12,7 @@ pub struct MatchingEngine {
     ingress: Receiver<OrderMsg>,
     egress: Sender<MarketEvent>,
     pricing: Pricing,
+    seq: u64,
 }
 
 impl MatchingEngine {
@@ -22,6 +23,7 @@ impl MatchingEngine {
             ingress,
             egress,
             pricing: Pricing::Maker,
+            seq: 0,
         }
     }
 
@@ -92,22 +94,27 @@ impl MatchingEngine {
         self.publish_bbo();
     }
 
-    fn publish_bbo(&self) {
-        self.egress
-            .send(MarketEvent::Bbo(Bbo {
-                bid: self.book.best_bid(),
-                ask: self.book.best_ask(),
-            }))
-            .unwrap();
+    fn publish(&mut self, event: MarketEventContent) {
+        let ev = MarketEvent {
+            seq: self.seq,
+            event,
+        };
+        self.egress.send(ev).unwrap();
+        self.seq += 1;
     }
 
-    fn publish_reject(&self, id: u64, reason: RejectReason) {
-        self.egress
-            .send(MarketEvent::Reject { id, reason })
-            .unwrap();
+    fn publish_bbo(&mut self) {
+        self.publish(MarketEventContent::Bbo(Bbo {
+            bid: self.book.best_bid(),
+            ask: self.book.best_ask(),
+        }));
     }
 
-    fn publish_trade(&self, trade: Trade) {
-        self.egress.send(MarketEvent::Trade(trade)).unwrap();
+    fn publish_reject(&mut self, id: u64, reason: RejectReason) {
+        self.publish(MarketEventContent::Reject { id, reason });
+    }
+
+    fn publish_trade(&mut self, trade: Trade) {
+        self.publish(MarketEventContent::Trade(trade));
     }
 }

@@ -8,6 +8,8 @@
 //!       Record: write each `OrderMsg` as NDJSON to `<file>`.
 //!   `uxch-ingress-binance --replay <file> [<symbol>]`
 //!       Replay: read `<file>` and forward each `OrderMsg` to uxch over TCP.
+//!       `--pace <microsecs>` sleeps that long between forwarded orders (replay
+//!       only) so the egress sink can keep up — handy for deterministic tests.
 //!
 //! `<symbol>` defaults to `bnbusdt`. `--record`/`--replay` may be given as
 //! `--record <file>` or `--record=<file>`, and are mutually exclusive.
@@ -133,12 +135,14 @@ enum Mode {
 struct Args {
     mode: Mode,
     symbol: String,
+    pace_us: u64,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut symbol = String::new();
     let mut record: Option<String> = None;
     let mut replay: Option<String> = None;
+    let mut pace_us: u64 = 0;
 
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -166,6 +170,14 @@ fn parse_args() -> Result<Args, String> {
                 }
                 replay = Some(f);
             }
+            "--pace" => {
+                let v = inline
+                    .or_else(|| it.next())
+                    .ok_or_else(|| "--pace needs a number of microsecs".to_string())?;
+                pace_us = v.parse().map_err(|_| {
+                    format!("--pace needs a non-negative integer of microsecs, got {v:?}")
+                })?;
+            }
             "--help" | "-h" => {
                 print!(
                     "uxch-ingress-binance — sync a Binance order book.\n\
@@ -173,10 +185,11 @@ fn parse_args() -> Result<Args, String> {
                      Usage:\n  \
                      uxch-ingress-binance [<symbol>]                  live → uxch\n  \
                      uxch-ingress-binance --record <file> [<symbol>]  record → file\n  \
-                     uxch-ingress-binance --replay <file> [<symbol>]  replay file → uxch\n\
+                     uxch-ingress-binance --replay <file> [<symbol>]  replay file → uxch\n  \
+                     uxch-ingress-binance --replay <file> --pace <us>  paced replay\n\
                      \n\
                      Env: UXCH_INGRESS_ADDR (default 127.0.0.1:9999) — uxch ingress addr.\n\
-                     Default symbol: bnbusdt.\n"
+                     Default symbol: bnbusdt. --pace <microsecs> sleeps between orders (replay).\n"
                 );
                 std::process::exit(0);
             }
@@ -208,7 +221,14 @@ fn parse_args() -> Result<Args, String> {
     } else {
         symbol
     };
-    Ok(Args { mode, symbol })
+    if pace_us > 0 && !matches!(mode, Mode::Replay(_)) {
+        return Err("--pace is only meaningful with --replay".into());
+    }
+    Ok(Args {
+        mode,
+        symbol,
+        pace_us,
+    })
 }
 
 fn main() {
@@ -260,10 +280,18 @@ fn main() {
             }
         }
         Mode::Replay(file) => {
-            println!("uxch-ingress-binance: replay {file} → {addr}");
+            let pace = std::time::Duration::from_micros(args.pace_us);
+            println!(
+                "uxch-ingress-binance: replay {file} → {addr}{}",
+                if pace.is_zero() {
+                    String::new()
+                } else {
+                    format!(" (pace {}µs/order)", args.pace_us)
+                }
+            );
             let mut forwarder = Forwarder::new(addr);
             forwarder.ensure_connected();
-            if let Err(e) = uxch_ingress_binance::replay(&file, |msg| forwarder.send(&msg)) {
+            if let Err(e) = uxch_ingress_binance::replay(&file, pace, |msg| forwarder.send(&msg)) {
                 eprintln!("fatal: {e}");
                 std::process::exit(1);
             }
