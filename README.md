@@ -14,13 +14,10 @@ Do not use this in production.
 ## Architecture
 
 ```
-                         Binance diff-depth WS
-                                 │
-                                 ▼
    ┌────────────────────────────────────────────────────┐
-   │ uxch-ingress-binance                                │
-   │  depth-sync (snapshot seed + diff stream) → OrderMsg│
-   │  modes: live · --record <tape> · --replay <tape>    │
+   │ uxch-web-server                                     │
+   │  HTTP (forms) + WebSocket (BBO) on one port          │
+   │  ingress client → uxch · egress listener ← uxch     │
    └──────────────────┬─────────────────────────────────┘
         OrderMsg NDJSON  (TCP, one JSON object per line)
                       ▼
@@ -31,11 +28,27 @@ Do not use this in production.
         MarketEvent NDJSON  (TCP; uxch dials out to the sink)
                       ▼
    ┌────────────────────────────────────────────────────┐
-   │ uxch-egress-terminal                                │
-   │  render to stdout · --save (active) · --record (all)│
-   │  failover across comma-separated listen addresses   │
+   │ uxch-web-server (egress side)                       │
+   │  parse MarketEvent → broadcast BBO to WS clients    │
    └────────────────────────────────────────────────────┘
 ```
+
+Single-threaded matching core (LMAX style): no memory barriers, no false sharing,
+the book stays hot in L1/L2. Ingress and egress are decoupled via the lock-free
+rings.
+
+## High availability
+
+Two complete pipelines on different ports; both ingresses independently 
+sync their orders, so both uxch instances converge to the same BBO. 
+If one dies, the other is already live.
+
+```
+ingress-A ─▶ uxch-A ─▶ :9997 ┐
+                            ├──▶ uxch-egress-terminal
+ingress-B ─▶ uxch-B ─▶ :9996 ┘   (prefers :9997, falls back to :9996)
+```
+
 
 Single-threaded matching core (LMAX style): no memory barriers, no false sharing,
 the book stays hot in L1/L2. Ingress and egress are decoupled via the lock-free
@@ -59,8 +72,12 @@ ingress-B ─▶ uxch-B ─▶ :9996 ┘   (prefers :9997, falls back to :9996)
 ```
 cargo r -p uxch -r
 cargo t
-just ha
+just web          # open http://127.0.0.1:8080 and submit orders
 ```
+
+`just web` starts `uxch-web-server` (egress listener + HTTP/WS on
+`127.0.0.1:8080`) and `uxch` (connects to egress, listens for ingress). Open the
+URL, fill a limit/market/cancel form, and watch the BBO div update live.
 
 ## See more
 

@@ -193,6 +193,60 @@ binance-replay-check:
         exit 1
     fi
 
+# web UI test
+[group("smoke")]
+web:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    duration="${WEB_DURATION:-0}"   # 0 = run until Ctrl-C
+
+    cargo build -p uxch -p uxch-web-server
+
+    mkdir -p target/logs
+    LOGS=$(mktemp -d target/logs/web.XXXXXX)
+    LOG="$LOGS/all.log"
+    : > "$LOG"
+    echo "web: merged logs → $LOG"
+
+    INGRESS_ADDR=127.0.0.1:9999
+    EGRESS_ADDR=127.0.0.1:9998
+    WEB_ADDR="${UXCH_WEB_ADDR:-127.0.0.1:8080}"
+
+    WEB_PID=0
+    UXCH_PID=0
+    cleanup() {
+        if [ "${WEB_PID:-0}" -ne 0 ] || [ "${UXCH_PID:-0}" -ne 0 ]; then
+            echo "web: killing pipeline"
+        fi
+        kill "$UXCH_PID" "$WEB_PID" 2>/dev/null || true
+        wait "$UXCH_PID" "$WEB_PID" 2>/dev/null || true
+    }
+    trap cleanup EXIT
+    trap 'cleanup; exit 130' INT
+
+    # web-server binds the egress listener (uxch dials it) + the HTTP/WS port;
+    # start it first, then uxch (which connects to egress + listens for ingress).
+    UXCH_EGRESS_ADDR="$EGRESS_ADDR" UXCH_WEB_ADDR="$WEB_ADDR" \
+        target/debug/uxch-web-server \
+        > >(awk -v l="[web]" '{ print l, $0; fflush() }' >> "$LOG") 2>&1 &
+    WEB_PID=$!
+    sleep 0.5
+    UXCH_INGRESS_ADDR="$INGRESS_ADDR" UXCH_EGRESS_ADDR="$EGRESS_ADDR" \
+        target/debug/uxch \
+        > >(awk -v l="[uxch]" '{ print l, $0; fflush() }' >> "$LOG") 2>&1 &
+    UXCH_PID=$!
+
+    echo "web: pids web=$WEB_PID uxch=$UXCH_PID"
+    echo "web: open http://${WEB_ADDR} (Ctrl-C to stop)"
+
+    if [ "$duration" -gt 0 ]; then
+        sleep "$duration"
+        echo "web: done — see $LOG"
+    else
+        wait "$UXCH_PID"
+    fi
+
 # HA failover stress test. Options: UXCH_HA_ITERS, UXCH_HA_SEED
 [group("test")]
 ha:

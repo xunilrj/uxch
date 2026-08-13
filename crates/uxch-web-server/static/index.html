@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>uxch</title>
+<style>
+  body { font: 14px ui-monospace, monospace; margin: 1.5rem; color: #111; }
+  h1 { font-size: 1.2rem; margin: 0 0 .4rem; }
+  h2 { font-size: 1rem; margin: 1rem 0 .3rem; }
+  form { margin: .3rem 0; padding: .5rem; border: 1px solid #ccc; }
+  label { display: inline-block; width: 3.5rem; }
+  input, select { font: inherit; }
+  .bbo { font-size: 1.3rem; padding: .7rem; border: 1px solid #888; background: #f6f6f6; }
+  .status { color: #555; }
+</style>
+</head>
+<body>
+<h1>uxch — matching engine</h1>
+
+<div class="bbo">bid = <span id="bid">—</span> &nbsp;&nbsp; ask = <span id="ask">—</span></div>
+<p class="status">
+  ws: <span id="wsstatus">connecting…</span>
+  &nbsp;&nbsp; last order id: <span id="lastid">none</span>
+</p>
+
+<h2>New limit order</h2>
+<form id="limit">
+  <label>side</label><select name="side"><option>buy</option><option>sell</option></select>
+  <label>price</label><input name="price" value="100.00">
+  <label>qty</label><input name="qty" value="1.00">
+  <label>tif</label><select name="tif"><option>gtc</option><option>ioc</option><option>fok</option></select>
+  <button>send</button>
+</form>
+
+<h2>New market order</h2>
+<form id="market">
+  <label>side</label><select name="side"><option>buy</option><option>sell</option></select>
+  <label>qty</label><input name="qty" value="1.00">
+  <label>tif</label><select name="tif"><option>gtc</option><option>ioc</option><option>fok</option></select>
+  <button>send</button>
+</form>
+
+<h2>Cancel</h2>
+<form id="cancel">
+  <label>id</label><input name="id" value="1">
+  <button>cancel</button>
+</form>
+
+<script>
+const SCALE = 100000000;
+let nextId = 1;
+const $ = (id) => document.getElementById(id);
+
+// A [price, qty] pair (scaled ints) -> "price @ qty", or "—" when absent.
+function fmt(px) {
+  if (px === null || px === undefined) return "—";
+  return (px[0] / SCALE).toFixed(2) + " @ " + (px[1] / SCALE).toFixed(4);
+}
+
+function openWs() {
+  const ws = new WebSocket("ws://" + location.host + "/ws");
+  ws.onopen  = () => { $("wsstatus").textContent = "open"; };
+  ws.onclose = () => { $("wsstatus").textContent = "closed (reconnecting…)"; setTimeout(openWs, 1000); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (e) => {
+    try {
+      const b = JSON.parse(e.data);
+      $("bid").textContent = fmt(b.bid);
+      $("ask").textContent = fmt(b.ask);
+    } catch (err) { /* ignore malformed */ }
+  };
+}
+openWs();
+
+async function post(url, body) {
+  try {
+    await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  } catch (e) { console.error("post failed", e); }
+}
+
+function takeId() { const id = nextId++; $("lastid").textContent = id; return id; }
+
+document.getElementById("limit").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target;
+  post("/order", {
+    kind: "limit",
+    id: takeId(),
+    side: f.side.value,
+    price: Math.round(parseFloat(f.price.value) * SCALE),
+    qty: Math.round(parseFloat(f.qty.value) * SCALE),
+    tif: f.tif.value,
+  });
+});
+
+document.getElementById("market").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target;
+  post("/order", {
+    kind: "market",
+    id: takeId(),
+    side: f.side.value,
+    qty: Math.round(parseFloat(f.qty.value) * SCALE),
+    tif: f.tif.value,
+  });
+});
+
+document.getElementById("cancel").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target;
+  post("/cancel", { id: parseInt(f.id.value, 10) });
+});
+</script>
+</body>
+</html>
