@@ -12,16 +12,30 @@
   input, select { font: inherit; }
   .bbo { font-size: 1.3rem; padding: .7rem; border: 1px solid #888; background: #f6f6f6; }
   .status { color: #555; }
+  #trades { max-height: 14rem; overflow-y: auto; border: 1px solid #ccc; padding: .4rem; }
+  #trades > div { white-space: pre; }
 </style>
 </head>
 <body>
 <h1>uxch — matching engine</h1>
 
-<div class="bbo">bid = <span id="bid">—</span> &nbsp;&nbsp; ask = <span id="ask">—</span></div>
+  <div class="book" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; padding: 0.7rem; border: 1px solid #888; background: #f6f6f6;">
+  <div>
+    <div style="font-weight: bold; border-bottom: 1px solid #ccc;">Bids</div>
+    <div id="bids"></div>
+  </div>
+  <div>
+    <div style="font-weight: bold; border-bottom: 1px solid #ccc;">Asks</div>
+    <div id="asks"></div>
+  </div>
+</div>
 <p class="status">
   ws: <span id="wsstatus">connecting…</span>
   &nbsp;&nbsp; last order id: <span id="lastid">none</span>
 </p>
+
+<h2>Trades</h2>
+<div id="trades"></div>
 
 <h2>New limit order</h2>
 <form id="limit">
@@ -57,6 +71,20 @@ function fmt(px) {
   return (px[0] / SCALE).toFixed(2) + " @ " + (px[1] / SCALE).toFixed(4);
 }
 
+// Newest-first trade log, capped so the DOM can't grow without bound.
+const MAX_TRADES = 50;
+function addTrade(t) {
+  const line = (t.price / SCALE).toFixed(2) + " @ " + (t.qty / SCALE).toFixed(4)
+    + "  maker=" + t.maker + " taker=" + t.taker;
+  const el = document.createElement("div");
+  el.textContent = line;
+  const log = $("trades");
+  log.prepend(el);
+  while (log.childElementCount > MAX_TRADES) {
+    log.lastChild.remove();
+  }
+}
+
 function openWs() {
   const ws = new WebSocket("ws://" + location.host + "/ws");
   ws.onopen  = () => { $("wsstatus").textContent = "open"; };
@@ -65,8 +93,14 @@ function openWs() {
   ws.onmessage = (e) => {
     try {
       const b = JSON.parse(e.data);
-      $("bid").textContent = fmt(b.bid);
-      $("ask").textContent = fmt(b.ask);
+      if (b.bids || b.asks) {
+        const bids = b.bids.map(p => fmt(p)).join("<br>");
+        const asks = b.asks.map(p => fmt(p)).join("<br>");
+        $("bids").innerHTML = bids || "—";
+        $("asks").innerHTML = asks || "—";
+      } else if (b.maker !== undefined) {
+        addTrade(b);
+      }
     } catch (err) { /* ignore malformed */ }
   };
 }

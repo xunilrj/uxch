@@ -11,8 +11,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use uxch_core::egress::RejectReason;
-use uxch_core::{Bbo, MarketEvent, MarketEventContent, Trade};
+use uxch_core::egress::{L2, RejectReason};
+use uxch_core::{MarketEvent, MarketEventContent, Trade};
 
 /// Fixed-point scale used across uxch (8 decimals).
 const SCALE: u64 = 100_000_000;
@@ -517,7 +517,7 @@ fn relay(
 pub fn render(ev: &MarketEventContent) -> String {
     match ev {
         MarketEventContent::Trade(t) => render_trade(t),
-        MarketEventContent::Bbo(b) => render_bbo(b),
+        MarketEventContent::L2(l) => render_l2(l),
         MarketEventContent::Reject { id, reason } => {
             format!("reject id={id} reason={}", render_reason(reason))
         }
@@ -534,16 +534,26 @@ fn render_trade(t: &Trade) -> String {
     )
 }
 
-fn render_bbo(b: &Bbo) -> String {
-    let bid = b
-        .bid
-        .map(|(p, q)| format!("{}x{}", fmt_price(p), fmt_qty(q)))
-        .unwrap_or_else(|| "-".into());
-    let ask = b
-        .ask
-        .map(|(p, q)| format!("{}x{}", fmt_price(p), fmt_qty(q)))
-        .unwrap_or_else(|| "-".into());
-    format!("bbo    bid={bid}  ask={ask}")
+fn render_l2(l: &L2) -> String {
+    let bids = if l.bids.is_empty() {
+        "-".into()
+    } else {
+        l.bids
+            .iter()
+            .map(|(p, q)| format!("{}x{}", fmt_price(*p), fmt_qty(*q)))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let asks = if l.asks.is_empty() {
+        "-".into()
+    } else {
+        l.asks
+            .iter()
+            .map(|(p, q)| format!("{}x{}", fmt_price(*p), fmt_qty(*q)))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    format!("l2    bid={}  ask={}", bids, asks)
 }
 
 fn render_reason(r: &RejectReason) -> &'static str {
@@ -607,23 +617,20 @@ mod tests {
     }
 
     #[test]
-    fn render_bbo_handles_missing_sides() {
-        let full = Bbo {
-            bid: Some((6_000_010_000_000, 125_000_000)),
-            ask: Some((6_000_050_000_000, 50_000_000)),
+    fn render_l2_handles_missing_sides() {
+        let full = L2 {
+            bids: vec![(6_000_010_000_000, 125_000_000)],
+            asks: vec![(6_000_050_000_000, 50_000_000)],
         };
         assert_eq!(
-            render(&MarketEventContent::Bbo(full)),
-            "bbo    bid=60000.10000000x1.25000000  ask=60000.50000000x0.50000000"
+            render(&MarketEventContent::L2(full)),
+            "l2    bid=60000.10000000x1.25000000  ask=60000.50000000x0.50000000"
         );
-        let empty = Bbo {
-            bid: None,
-            ask: None,
+        let empty = L2 {
+            bids: vec![],
+            asks: vec![],
         };
-        assert_eq!(
-            render(&MarketEventContent::Bbo(empty)),
-            "bbo    bid=-  ask=-"
-        );
+        assert_eq!(render(&MarketEventContent::L2(empty)), "l2    bid=-  ask=-");
     }
 
     #[test]
@@ -639,13 +646,13 @@ mod tests {
     fn market_event_round_trips_through_serde() {
         let ev = MarketEvent {
             seq: 7,
-            event: MarketEventContent::Bbo(Bbo {
-                bid: Some((100, 5)),
-                ask: None,
+            event: MarketEventContent::L2(L2 {
+                bids: vec![(100, 5)],
+                asks: vec![],
             }),
         };
         let s = serde_json::to_string(&ev).unwrap();
-        assert!(s.starts_with(r#"{"seq":7,"event":{"bbo":"#));
+        assert!(s.starts_with(r#"{"seq":7,"event":{"l2":"#));
         let back: MarketEvent = serde_json::from_str(&s).unwrap();
         assert_eq!(ev, back);
     }

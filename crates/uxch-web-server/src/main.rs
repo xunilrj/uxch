@@ -18,9 +18,15 @@ const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Shared app state: the ingress forwarder to uxch and the live WS clients.
+struct Broadcast {
+    clients: Vec<Sender<String>>,
+    last_l2: Option<String>,
+}
+
+/// Shared app state: the ingress forwarder to uxch and the live WS clients.
 struct State {
     ingress: Mutex<IngressForwarder>,
-    ws_clients: Mutex<Vec<Sender<String>>>,
+    bcast: Mutex<Broadcast>,
 }
 
 /// Ingress client to uxch: lazily (re)connects and writes `OrderMsg` NDJSON.
@@ -85,10 +91,13 @@ fn main() {
 
     let state = Arc::new(State {
         ingress: Mutex::new(IngressForwarder::new(ingress_addr)),
-        ws_clients: Mutex::new(Vec::new()),
+        bcast: Mutex::new(Broadcast {
+            clients: Vec::new(),
+            last_l2: None,
+        }),
     });
 
-    // Egress listener: uxch dials us and streams MarketEvent NDJSON. Every BBO
+    // Egress listener: uxch dials us and streams MarketEvent NDJSON. Every L2
     // is broadcast to all registered WS clients (dead senders are reaped).
     {
         let state = state.clone();
@@ -141,13 +150,24 @@ fn egress_relay(stream: TcpStream, state: Arc<State>) {
         let Ok(ev) = serde_json::from_str::<MarketEvent>(&line) else {
             continue;
         };
-        if let MarketEventContent::Bbo(bbo) = ev.event {
-            let Ok(msg) = serde_json::to_string(&bbo) else {
-                continue;
-            };
-            // Broadcast, dropping any client whose channel is closed.
-            let mut clients = state.ws_clients.lock().unwrap();
-            clients.retain(|tx| tx.send(msg.clone()).is_ok());
+        match ev.event {
+            MarketEventContent::L2(l2) => {
+                let Ok(msg) = serde_json::to_string(&l2) else {
+                    continue;
+                };
+                let mut bcast = state.bcast.lock().unwrap();
+                bcast.last_l2 = Some(msg.clone());
+                bcast.clients.retain(|tx| tx.send(msg.clone()).is_ok());
+            }
+            // a late-joining client gets the current book, not trade history.
+            MarketEventContent::Trade(t) => {
+                let Ok(msg) = serde_json::to_string(&t) else {
+                    continue;
+                };
+                let mut bcast = state.bcast.lock().unwrap();
+                bcast.clients.retain(|tx| tx.send(msg.clone()).is_ok());
+            }
+            MarketEventContent::Reject { .. } => {}
         }
     }
     eprintln!("web-server: egress disconnected; waiting for reconnect");
@@ -202,12 +222,14 @@ fn handle_ws(stream: TcpStream, state: Arc<State>) {
         }
     };
     let (tx, rx) = mpsc::channel::<String>();
-    let n = {
-        let mut clients = state.ws_clients.lock().unwrap();
-        clients.push(tx);
-        clients.len()
-    };
-    eprintln!("web-server: ws client connected ({n} total)");
+    {
+        let mut bcast = state.bcast.lock().unwrap();
+        bcast.clients.push(tx);
+        if let Some(snapshot) = bcast.last_l2.clone() {
+            let _ = ws.send(Message::Text(snapshot.into()));
+        }
+    }
+    eprintln!("web-server: ws client connected");
 
     loop {
         match rx.recv_timeout(Duration::from_secs(1)) {

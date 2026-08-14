@@ -7,7 +7,7 @@ pub mod ingress;
 pub mod slab;
 
 pub use book::{Book, Order, Pricing};
-pub use egress::{Bbo, MarketEvent, MarketEventContent, Trade};
+pub use egress::{L2, MarketEvent, MarketEventContent, Trade};
 pub use engine::MatchingEngine;
 pub use ingress::OrderMsg;
 pub use milkyapps_core::sync::bounded;

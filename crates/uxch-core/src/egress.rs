@@ -10,12 +10,13 @@ pub struct Trade {
     pub taker: OrderId,
 }
 
-/// Best bid / best offer snapshot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Full L2 depth: aggregated size at every price level. Bids are ordered
+/// best→worst (descending price), asks best→worst (ascending price).
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Bbo {
-    pub bid: Option<(Price, Qty)>,
-    pub ask: Option<(Price, Qty)>,
+pub struct L2 {
+    pub bids: Vec<(Price, Qty)>,
+    pub asks: Vec<(Price, Qty)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,7 +24,7 @@ pub struct Bbo {
 #[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
 pub enum MarketEventContent {
     Trade(Trade),
-    Bbo(Bbo),
+    L2(L2),
     Reject { id: OrderId, reason: RejectReason },
 }
 

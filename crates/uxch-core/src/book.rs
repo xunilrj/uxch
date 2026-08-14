@@ -1,4 +1,4 @@
-use crate::egress::Trade;
+use crate::egress::{L2, Trade};
 use crate::{OrderId, OrderType, Price, Qty, Side, TimeInForce};
 use std::collections::{BTreeMap, VecDeque};
 
@@ -77,6 +77,22 @@ impl Book {
     pub fn best_ask(&self) -> Option<(Price, Qty)> {
         let (&price, level) = self.asks.first_key_value()?;
         Some((price, level.iter().map(Order::remaining).sum::<Qty>()))
+    }
+
+    /// Aggregated L2 depth: bids best→worst, asks best→worst.
+    pub fn l2(&self) -> L2 {
+        let bids = self
+            .bids
+            .iter()
+            .rev()
+            .map(|(&p, lvl)| (p, lvl.iter().map(Order::remaining).sum::<Qty>()))
+            .collect();
+        let asks = self
+            .asks
+            .iter()
+            .map(|(&p, lvl)| (p, lvl.iter().map(Order::remaining).sum::<Qty>()))
+            .collect();
+        L2 { bids, asks }
     }
 
     pub fn cancel(&mut self, id: OrderId) -> bool {

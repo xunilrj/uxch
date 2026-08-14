@@ -1,5 +1,5 @@
 use crate::book::{Book, Order, Pricing};
-use crate::egress::{Bbo, MarketEvent, MarketEventContent, RejectReason};
+use crate::egress::{MarketEvent, MarketEventContent, RejectReason};
 use crate::ingress::OrderMsg;
 use crate::slab::Slab;
 use crate::{OrderId, OrderType, Qty, Side, TimeInForce, Trade};
@@ -41,7 +41,7 @@ impl MatchingEngine {
                 } => self.handle_new(id, side, ty, tif, qty),
                 OrderMsg::Cancel { id } => {
                     self.book.cancel(id);
-                    self.publish_bbo();
+                    self.publish_l2();
                 }
             }
         }
@@ -56,7 +56,7 @@ impl MatchingEngine {
         // reject unless the full quantity of a fok can be filled now.
         if tif == TimeInForce::Fok && !self.book.can_fill(side, crossing_limit, qty) {
             self.publish_reject(id, RejectReason::FokNotFullyFillable);
-            self.publish_bbo();
+            self.publish_l2();
             return;
         }
 
@@ -91,7 +91,7 @@ impl MatchingEngine {
             self.book.insert(incoming);
         }
 
-        self.publish_bbo();
+        self.publish_l2();
     }
 
     fn publish(&mut self, event: MarketEventContent) {
@@ -103,11 +103,8 @@ impl MatchingEngine {
         self.seq += 1;
     }
 
-    fn publish_bbo(&mut self) {
-        self.publish(MarketEventContent::Bbo(Bbo {
-            bid: self.book.best_bid(),
-            ask: self.book.best_ask(),
-        }));
+    fn publish_l2(&mut self) {
+        self.publish(MarketEventContent::L2(self.book.l2()));
     }
 
     fn publish_reject(&mut self, id: u64, reason: RejectReason) {

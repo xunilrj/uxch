@@ -148,13 +148,13 @@ fn run_test_case(case: TestCase) -> Result<(), Failed> {
     engine.run();
 
     let mut fills = Vec::new();
-    let mut last_bbo = None;
+    let mut last_l2 = None;
     let mut reject_ids = Vec::new();
     let mut reject_reasons: Vec<&'static str> = Vec::new();
     while let Some(ev) = egress_rx.try_recv() {
         match ev.event {
             MarketEventContent::Trade(t) => fills.push((t.price, t.qty, t.maker, t.taker)),
-            MarketEventContent::Bbo(b) => last_bbo = Some(b),
+            MarketEventContent::L2(l) => last_l2 = Some(l),
             MarketEventContent::Reject { id, reason } => {
                 reject_ids.push(id);
                 reject_reasons.push(match reason {
@@ -202,13 +202,15 @@ fn run_test_case(case: TestCase) -> Result<(), Failed> {
     }
 
     if let Some(exp_bbo) = case.expected.bbo {
-        let actual = last_bbo.ok_or_else(|| "expected a BBO update but got none".to_string())?;
+        let actual = last_l2.ok_or_else(|| "expected an L2 update but got none".to_string())?;
         let exp_bid = exp_bbo.bid.map(|l| (l.price, l.qty));
         let exp_ask = exp_bbo.ask.map(|l| (l.price, l.qty));
-        if actual.bid != exp_bid || actual.ask != exp_ask {
+        let actual_bid = actual.bids.first().map(|(p, q)| (*p, *q));
+        let actual_ask = actual.asks.first().map(|(p, q)| (*p, *q));
+        if actual_bid != exp_bid || actual_ask != exp_ask {
             return Err(format!(
                 "bbo mismatch\n  expected: bid={exp_bid:?} ask={exp_ask:?}\n  got:      bid={:?} ask={:?}",
-                actual.bid, actual.ask
+                actual_bid, actual_ask
             )
             .into());
         }
